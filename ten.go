@@ -97,8 +97,13 @@ func (c *Compiler) literal(out *AST) bool {
 		*out = Value{v.Text == "true"}
 		return true
 	}
-	if c.MatchOut(nom.DIGITS, &v) || c.MatchOut(nom.STRING, &v) {
+	if c.MatchOut(nom.DIGITS, &v) {
 		*out = Value{v.Text}
+		return true
+	}
+	if c.MatchOut(nom.STRING, &v) {
+		str, _ := strconv.Unquote(v.Text)
+		*out = Value{str}
 		return true
 	}
 	return false
@@ -353,6 +358,8 @@ func (t *Template) execute(n AST, w io.Writer) {
 		case Path:
 			t.Variables[n.LHS.Name.Text] = rhs.Resolve(t.Variables)
 		}
+	case Value:
+		fmt.Fprint(w, n.Value)
 	case Text:
 		fmt.Fprint(w, n.Value.Text)
 	default:

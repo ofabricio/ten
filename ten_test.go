@@ -115,6 +115,10 @@ func TestExecute(t *testing.T) {
 			give: `{{ for v : [ ["A", "B"], [1, 2] ]}}(V:{{ v[0] }} D:{{ v[1] }}){{ end }}`,
 			then: "(V:A D:B)(V:1 D:2)",
 		},
+		{
+			give: `{{ "a\nb" }} {{ "\"a\nb\"" }}`,
+			then: "a\nb \"a\nb\"",
+		},
 	}
 
 	for _, tc := range tt {
