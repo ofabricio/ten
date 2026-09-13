@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"reflect"
 	"strconv"
 
 	"github.com/ofabricio/nom"
@@ -103,13 +104,38 @@ func (c *Compiler) literal(out *AST) bool {
 }
 
 func (c *Compiler) variable(out *AST) bool {
-	var v nom.Token
-	if c.MatchOut(".", &v) || c.MatchOut(nom.WORD, &v) {
+
+	idxOrVar := func(v nom.Token) AST {
 		if i := 0; c.idx(&i) {
-			*out = Index{v, i}
-		} else {
-			*out = Variable{v}
+			return Index{v, i}
 		}
+		return Variable{v}
+	}
+
+	var p []AST
+	var v nom.Token
+
+	if c.MatchOut(".", &v) {
+		p = append(p, idxOrVar(v))
+	}
+
+	for c.Match(".") && c.ExpOut(nom.WORD, &v) {
+		p = append(p, idxOrVar(v))
+	}
+
+	if c.MatchOut(nom.WORD, &v) {
+		p = append(p, idxOrVar(v))
+		for c.Match(".") && c.ExpOut(nom.WORD, &v) {
+			p = append(p, idxOrVar(v))
+		}
+	}
+
+	if len(p) > 1 {
+		*out = Path{Path: p}
+		return true
+	}
+	if len(p) == 1 {
+		*out = p[0]
 		return true
 	}
 	return false
@@ -191,6 +217,10 @@ type Template struct {
 	Variables  map[string]any
 }
 
+type Path struct {
+	Path []AST
+}
+
 type Variable struct {
 	Name nom.Token
 }
@@ -270,6 +300,29 @@ func (t *Template) execute(n AST, w io.Writer) {
 			n.Cond = t.Variables[cond.Name.Text]
 			t.execute(n, w)
 		}
+	case Path:
+		var v reflect.Value
+		switch p := n.Path[0].(type) {
+		case Variable:
+			v = reflect.ValueOf(t.Variables[p.Name.Text])
+		case Index:
+			v = reflect.ValueOf(t.Variables[p.Var.Text]).Index(p.Idx)
+		}
+		for _, p := range n.Path[1:] {
+			if v.Kind() == reflect.Interface {
+				v = v.Elem()
+			}
+			switch v.Kind() {
+			case reflect.Map:
+				switch p := p.(type) {
+				case Variable:
+					v = v.MapIndex(reflect.ValueOf(p.Name.Text))
+				case Index:
+					v = v.MapIndex(reflect.ValueOf(p.Var.Text)).Elem().Index(p.Idx)
+				}
+			}
+		}
+		t.execute(v.Interface(), w)
 	case Assignment:
 		switch rhs := n.RHS.(type) {
 		case Value:
