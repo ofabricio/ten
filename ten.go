@@ -101,10 +101,6 @@ func (c *Compiler) assignment(out *AST) bool {
 
 func (c *Compiler) literal(out *AST) bool {
 	var v nom.Token
-	if c.MatchOut("true", &v) || c.MatchOut("false", &v) {
-		*out = Value{v.Text == "true"}
-		return true
-	}
 	if c.MatchOut(nom.DIGITS, &v) {
 		*out = Value{v.Text}
 		return true
@@ -183,7 +179,7 @@ func (c *Compiler) forIdx(v *nom.Token) bool {
 func (c *Compiler) ifStmt(out *AST) bool {
 	var cond AST
 	var stmt []AST
-	if c.Match("if") && c.value(&cond) && c.closeTag() && c.stmts(&stmt) {
+	if c.Match("if") && c.expr(&cond) && c.closeTag() && c.stmts(&stmt) {
 		var Then, Elze []AST
 		Then = stmt
 		for i, s := range stmt {
@@ -199,9 +195,70 @@ func (c *Compiler) ifStmt(out *AST) bool {
 	return false
 }
 
+func (c *Compiler) expr(out *AST) bool {
+	return c.boolCmpExpr(out)
+}
+
+func (c *Compiler) boolCmpExpr(out *AST) bool {
+	var l, r AST
+	if c.boolExpr(&l) {
+		c.ws()
+		var o nom.Token
+		if (c.MatchOut("==", &o) || c.MatchOut("!=", &o)) && c.boolCmpExpr(&r) {
+			*out = BoolExpr{o.Text, l, r}
+			return true
+		}
+		*out = l
+		return true
+	}
+	return false
+}
+
+func (c *Compiler) boolExpr(out *AST) bool {
+	var l, r AST
+	if c.boolAnd(&l) {
+		c.ws()
+		if c.Match("|") && c.boolExpr(&r) {
+			*out = BoolExpr{"|", l, r}
+			return true
+		}
+		*out = l
+		return true
+	}
+	return false
+}
+
+func (c *Compiler) boolAnd(out *AST) bool {
+	var l, r AST
+	if c.boolFact(&l) {
+		c.ws()
+		if c.Match("&") && c.boolAnd(&r) {
+			*out = BoolExpr{"&", l, r}
+			return true
+		}
+		*out = l
+		return true
+	}
+	return false
+}
+
+func (c *Compiler) boolFact(out *AST) bool {
+	c.ws()
+	return c.Match("(") && c.boolExpr(out) && c.Exp(")") || c.boolValue(out)
+}
+
+func (c *Compiler) boolValue(out *AST) bool {
+	var v nom.Token
+	if c.MatchOut("true", &v) || c.MatchOut("false", &v) {
+		*out = Value{v.Text == "true"}
+		return true
+	}
+	return c.variable(out)
+}
+
 func (c *Compiler) value(out *AST) bool {
 	c.ws()
-	return c.literal(out) || c.variable(out) || c.jsonValue(out)
+	return c.literal(out) || c.expr(out) || c.jsonValue(out)
 }
 
 func (c *Compiler) jsonValue(out *AST) bool {
@@ -327,6 +384,39 @@ type If struct {
 	Else []AST
 }
 
+type BoolExpr struct {
+	V string
+	L AST
+	R AST
+}
+
+func (b *BoolExpr) Evaluate(vars map[string]any) bool {
+	test := func(n AST) bool {
+		switch v := n.(type) {
+		case bool:
+			return v
+		case Value:
+			return v.Value.(bool)
+		case Path:
+			return v.Resolve(vars).(bool)
+		case BoolExpr:
+			return v.Evaluate(vars)
+		}
+		return false
+	}
+	switch b.V {
+	case "&":
+		return test(b.L) && test(b.R)
+	case "|":
+		return test(b.L) || test(b.R)
+	case "==":
+		return test(b.L) == test(b.R)
+	case "!=":
+		return test(b.L) != test(b.R)
+	}
+	return false
+}
+
 func (t *Template) Execute(v any, w io.Writer) {
 	t.Variables = make(map[string]any)
 	t.Variables["."] = v
@@ -367,6 +457,9 @@ func (t *Template) execute(n AST, w io.Writer) {
 			for _, stmt := range stmts {
 				t.execute(stmt, w)
 			}
+		case BoolExpr:
+			n.Cond = cond.Evaluate(t.Variables)
+			t.execute(n, w)
 		case Path:
 			n.Cond = cond.Resolve(t.Variables)
 			t.execute(n, w)
@@ -383,6 +476,8 @@ func (t *Template) execute(n AST, w io.Writer) {
 		case Path:
 			t.Variables[n.LHS.Name.Text] = rhs.Resolve(t.Variables)
 		}
+	case BoolExpr:
+		t.execute(n.Evaluate(t.Variables), w)
 	case Value:
 		fmt.Fprint(w, n.Value)
 	case Text:

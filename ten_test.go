@@ -103,8 +103,32 @@ func TestExecute(t *testing.T) {
 			then: "",
 		},
 		{
+			give: "{{ if true & true }}yes{{ else }}no{{ end }}",
+			then: "yes",
+		},
+		{
+			give: "{{ if true & true & false }}yes{{ else }}no{{ end }}",
+			then: "no",
+		},
+		{
+			give: "{{ if true & (false | true) }}yes{{ else }}no{{ end }}",
+			then: "yes",
+		},
+		{
 			give: "{{ for [true, false, false, true] }}{{ if . }}yes{{ else }}no{{ end }}{{ end }}",
 			then: "yesnonoyes",
+		},
+		{
+			give: "{{ false | true }}",
+			then: "true",
+		},
+		{
+			give: "{{ true & false }}",
+			then: "false",
+		},
+		{
+			give: "{{ true & true == false | true != false }}",
+			then: "true",
 		},
 		{
 			desc: "Test array index access",
