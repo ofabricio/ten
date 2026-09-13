@@ -112,3 +112,54 @@ func TestExecute(t *testing.T) {
 		}
 	}
 }
+
+func TestExecuteWithData(t *testing.T) {
+
+	tt := []struct {
+		desc string
+		give string
+		when any
+		then string
+	}{
+		{
+			give: `{{ . }}`,
+			when: 3,
+			then: `3`,
+		},
+		{
+			give: `{{ . }}`,
+			when: true,
+			then: `true`,
+		},
+		{
+			give: `{{ .A }}`,
+			when: struct{ A int }{A: 3},
+			then: `3`,
+		},
+		{
+			give: `{{ .A }}`,
+			when: &struct{ A int }{A: 3},
+			then: `3`,
+		},
+		{
+			give: `{{ .A.B }}`,
+			when: &struct{ A struct{ B int } }{A: struct{ B int }{B: 3}},
+			then: `3`,
+		},
+	}
+
+	for _, tc := range tt {
+
+		p, err := Compile(tc.give)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		var got bytes.Buffer
+		p.Execute(tc.when, &got)
+
+		if tc.then != got.String() {
+			t.Errorf("\nMsg:\n%q\nGot:\n%q\nExp:\n%q\n", cmp.Or(tc.desc, tc.give), got.String(), tc.then)
+		}
+	}
+}

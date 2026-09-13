@@ -312,6 +312,9 @@ func (t *Template) execute(n AST, w io.Writer) {
 			if v.Kind() == reflect.Interface {
 				v = v.Elem()
 			}
+			if v.Kind() == reflect.Pointer {
+				v = reflect.Indirect(v)
+			}
 			switch v.Kind() {
 			case reflect.Map:
 				switch p := p.(type) {
@@ -319,6 +322,13 @@ func (t *Template) execute(n AST, w io.Writer) {
 					v = v.MapIndex(reflect.ValueOf(p.Name.Text))
 				case Index:
 					v = v.MapIndex(reflect.ValueOf(p.Var.Text)).Elem().Index(p.Idx)
+				}
+			case reflect.Struct:
+				switch p := p.(type) {
+				case Variable:
+					v = v.FieldByName(p.Name.Text)
+				case Index:
+					v = v.FieldByName(p.Var.Text).Index(p.Idx)
 				}
 			}
 		}
