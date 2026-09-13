@@ -155,7 +155,7 @@ func (c *Compiler) forStmt(out *AST) bool {
 	var list AST
 	var stmt []AST
 	var v, i nom.Token
-	if c.Match("for") && c.forVar(&v, &i) && c.value(&list) && c.Exp("}}") && c.stmts(&stmt) {
+	if c.Match("for") && c.forVar(&v, &i) && c.value(&list) && c.ws() && c.Exp("}}") && c.stmts(&stmt) {
 		*out = For{Var: v, Idx: i, List: list, Stmt: stmt}
 		return true
 	}
@@ -221,6 +221,41 @@ type Path struct {
 	Path []AST
 }
 
+func (p *Path) Resolve(vars map[string]any) any {
+	var v reflect.Value
+	switch p := p.Path[0].(type) {
+	case Variable:
+		v = reflect.ValueOf(vars[p.Name.Text])
+	case Index:
+		v = reflect.ValueOf(vars[p.Var.Text]).Index(p.Idx)
+	}
+	for _, p := range p.Path[1:] {
+		if v.Kind() == reflect.Interface {
+			v = v.Elem()
+		}
+		if v.Kind() == reflect.Pointer {
+			v = reflect.Indirect(v)
+		}
+		switch v.Kind() {
+		case reflect.Map:
+			switch p := p.(type) {
+			case Variable:
+				v = v.MapIndex(reflect.ValueOf(p.Name.Text))
+			case Index:
+				v = v.MapIndex(reflect.ValueOf(p.Var.Text)).Elem().Index(p.Idx)
+			}
+		case reflect.Struct:
+			switch p := p.(type) {
+			case Variable:
+				v = v.FieldByName(p.Name.Text)
+			case Index:
+				v = v.FieldByName(p.Var.Text).Index(p.Idx)
+			}
+		}
+	}
+	return v.Interface()
+}
+
 type Variable struct {
 	Name nom.Token
 }
@@ -246,7 +281,7 @@ type Assignment struct {
 type For struct {
 	Var  nom.Token
 	Idx  nom.Token
-	List any
+	List AST
 	Stmt []AST
 }
 
@@ -269,19 +304,24 @@ func (t *Template) execute(n AST, w io.Writer) {
 			t.execute(stmt, w)
 		}
 	case For:
-		if list, ok := n.List.(Value); ok {
-			if arr, ok := list.Value.([]any); ok {
-				for i, item := range arr {
-					ctx := t.Variables["."]
-					t.Variables["."] = item
-					t.Variables[n.Idx.Text] = i
-					t.Variables[n.Var.Text] = item
-					for _, stmt := range n.Stmt {
-						t.execute(stmt, w)
-					}
-					t.Variables["."] = ctx
-				}
+		var arr []any
+		switch n := n.List.(type) {
+		case Path:
+			arr = n.Resolve(t.Variables).([]any)
+		case Variable:
+			arr = t.Variables[n.Name.Text].([]any)
+		case Value:
+			arr = n.Value.([]any)
+		}
+		for i, item := range arr {
+			ctx := t.Variables["."]
+			t.Variables["."] = item
+			t.Variables[n.Idx.Text] = i
+			t.Variables[n.Var.Text] = item
+			for _, stmt := range n.Stmt {
+				t.execute(stmt, w)
 			}
+			t.Variables["."] = ctx
 		}
 	case If:
 		switch cond := n.Cond.(type) {
@@ -301,38 +341,7 @@ func (t *Template) execute(n AST, w io.Writer) {
 			t.execute(n, w)
 		}
 	case Path:
-		var v reflect.Value
-		switch p := n.Path[0].(type) {
-		case Variable:
-			v = reflect.ValueOf(t.Variables[p.Name.Text])
-		case Index:
-			v = reflect.ValueOf(t.Variables[p.Var.Text]).Index(p.Idx)
-		}
-		for _, p := range n.Path[1:] {
-			if v.Kind() == reflect.Interface {
-				v = v.Elem()
-			}
-			if v.Kind() == reflect.Pointer {
-				v = reflect.Indirect(v)
-			}
-			switch v.Kind() {
-			case reflect.Map:
-				switch p := p.(type) {
-				case Variable:
-					v = v.MapIndex(reflect.ValueOf(p.Name.Text))
-				case Index:
-					v = v.MapIndex(reflect.ValueOf(p.Var.Text)).Elem().Index(p.Idx)
-				}
-			case reflect.Struct:
-				switch p := p.(type) {
-				case Variable:
-					v = v.FieldByName(p.Name.Text)
-				case Index:
-					v = v.FieldByName(p.Var.Text).Index(p.Idx)
-				}
-			}
-		}
-		t.execute(v.Interface(), w)
+		t.execute(n.Resolve(t.Variables), w)
 	case Assignment:
 		switch rhs := n.RHS.(type) {
 		case Value:

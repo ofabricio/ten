@@ -74,6 +74,14 @@ func TestExecute(t *testing.T) {
 			then: "A:2 I:0 B:4 J:0\nA:2 I:0 B:5 J:1\nA:3 I:1 B:4 J:0\nA:3 I:1 B:5 J:1\n",
 		},
 		{
+			give: `{{ . = [2, 3] }}{{ for . }}{{ . }}{{ end }}`,
+			then: "23",
+		},
+		{
+			give: `{{ . = { "a": [2, 3] } }}{{ for .a }}{{ . }}{{ end }}`,
+			then: "23",
+		},
+		{
 			give: "{{ if true }}yes{{ else }}no{{ end }}",
 			then: "yes",
 		},
