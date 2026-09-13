@@ -172,6 +172,7 @@ func (c *Compiler) ifStmt(out *AST) bool {
 	var stmt []AST
 	if c.Match("if") && c.value(&cond) && c.ws() && c.Exp("}}") && c.stmts(&stmt) {
 		var Then, Elze []AST
+		Then = stmt
 		for i, s := range stmt {
 			if _, ok := s.(Else); ok {
 				Then = stmt[:i]

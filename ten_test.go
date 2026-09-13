@@ -94,6 +94,14 @@ func TestExecute(t *testing.T) {
 			then: "no",
 		},
 		{
+			give: "{{ if true }}yes{{ end }}",
+			then: "yes",
+		},
+		{
+			give: "{{ if false }}yes{{ end }}",
+			then: "",
+		},
+		{
 			give: "{{ for [true, false, false, true] }}{{ if . }}yes{{ else }}no{{ end }}{{ end }}",
 			then: "yesnonoyes",
 		},
