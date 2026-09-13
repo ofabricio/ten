@@ -82,9 +82,10 @@ func (c *Compiler) elseStmt(out *AST) bool {
 }
 
 func (c *Compiler) assignment(out *AST) bool {
-	var lhs, rhs AST
-	if c.Undo(c.Mark(), c.variable(&lhs) && c.ws() && c.Match("=") && c.value(&rhs)) {
-		*out = Assignment{LHS: lhs.(Variable), RHS: rhs}
+	var lhs nom.Token
+	var rhs AST
+	if c.Undo(c.Mark(), (c.MatchOut(".", &lhs) || c.MatchOut(nom.WORD, &lhs)) && c.ws() && c.Match("=") && c.value(&rhs)) {
+		*out = Assignment{LHS: Variable{lhs}, RHS: rhs}
 		return true
 	}
 	return false
@@ -130,12 +131,8 @@ func (c *Compiler) variable(out *AST) bool {
 		}
 	}
 
-	if len(p) > 1 {
+	if len(p) > 0 {
 		*out = Path{Path: p}
-		return true
-	}
-	if len(p) == 1 {
-		*out = p[0]
 		return true
 	}
 	return false
@@ -190,9 +187,11 @@ func (c *Compiler) ifStmt(out *AST) bool {
 
 func (c *Compiler) value(out *AST) bool {
 	c.ws()
-	if c.literal(out) || c.variable(out) {
-		return true
-	}
+	return c.literal(out) || c.variable(out) || c.jsonValue(out)
+}
+
+func (c *Compiler) jsonValue(out *AST) bool {
+	// Temporary naive implementation.
 	if m := c.Mark(); c.Find("}}") {
 		var obj any
 		if err := json.Unmarshal([]byte(c.Token(m).Text), &obj); err != nil {
@@ -223,13 +222,16 @@ type Path struct {
 
 func (p *Path) Resolve(vars map[string]any) any {
 	var v reflect.Value
-	switch p := p.Path[0].(type) {
-	case Variable:
-		v = reflect.ValueOf(vars[p.Name.Text])
-	case Index:
-		v = reflect.ValueOf(vars[p.Var.Text]).Index(p.Idx)
-	}
-	for _, p := range p.Path[1:] {
+	for i, p := range p.Path {
+		if i == 0 {
+			switch p := p.(type) {
+			case Variable:
+				v = reflect.ValueOf(vars[p.Name.Text])
+			case Index:
+				v = reflect.ValueOf(vars[p.Var.Text]).Index(p.Idx)
+			}
+			continue
+		}
 		if v.Kind() == reflect.Interface {
 			v = v.Elem()
 		}
@@ -252,6 +254,9 @@ func (p *Path) Resolve(vars map[string]any) any {
 				v = v.FieldByName(p.Var.Text).Index(p.Idx)
 			}
 		}
+	}
+	if v.Kind() == reflect.Invalid {
+		return nil
 	}
 	return v.Interface()
 }
@@ -308,8 +313,6 @@ func (t *Template) execute(n AST, w io.Writer) {
 		switch n := n.List.(type) {
 		case Path:
 			arr = n.Resolve(t.Variables).([]any)
-		case Variable:
-			arr = t.Variables[n.Name.Text].([]any)
 		case Value:
 			arr = n.Value.([]any)
 		}
@@ -333,11 +336,11 @@ func (t *Template) execute(n AST, w io.Writer) {
 			for _, stmt := range stmts {
 				t.execute(stmt, w)
 			}
+		case Path:
+			n.Cond = cond.Resolve(t.Variables)
+			t.execute(n, w)
 		case Value:
 			n.Cond = cond.Value
-			t.execute(n, w)
-		case Variable:
-			n.Cond = t.Variables[cond.Name.Text]
 			t.execute(n, w)
 		}
 	case Path:
@@ -346,17 +349,9 @@ func (t *Template) execute(n AST, w io.Writer) {
 		switch rhs := n.RHS.(type) {
 		case Value:
 			t.Variables[n.LHS.Name.Text] = rhs.Value
-		case Variable:
-			t.Variables[n.LHS.Name.Text] = t.Variables[rhs.Name.Text]
+		case Path:
+			t.Variables[n.LHS.Name.Text] = rhs.Resolve(t.Variables)
 		}
-	case Index:
-		if arr, ok := t.Variables[n.Var.Text].([]any); ok {
-			t.execute(arr[n.Idx], w)
-		}
-	case Variable:
-		t.execute(t.Variables[n.Name.Text], w)
-	case Value:
-		t.execute(n.Value, w)
 	case Text:
 		fmt.Fprint(w, n.Value.Text)
 	default:

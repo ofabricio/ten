@@ -54,6 +54,10 @@ func TestExecute(t *testing.T) {
 			then: `3`,
 		},
 		{
+			give: `{{ a = { "b": 3 } }}{{ b = a.b }}{{ b }}`,
+			then: `3`,
+		},
+		{
 			give: "{{ for [2, 3] }}    Item: {{ . }}\n{{ end }}",
 			then: "    Item: 2\n    Item: 3\n",
 		},
