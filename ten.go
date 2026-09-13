@@ -56,9 +56,17 @@ func (c *Compiler) tag(out *AST) bool {
 		if _, ok := (*out).(End); ok {
 			return true
 		}
-		return c.ws() && c.Exp("}}")
+		return c.closeTag()
 	}
 	return false
+}
+
+func (c *Compiler) closeTag() bool {
+	c.ws()
+	if c.Match("-") {
+		return c.Exp("}}") && c.ws()
+	}
+	return c.Exp("}}")
 }
 
 func (c *Compiler) tagBody(out *AST) bool {
@@ -157,7 +165,7 @@ func (c *Compiler) forStmt(out *AST) bool {
 	var list AST
 	var stmt []AST
 	var v, i nom.Token
-	if c.Match("for") && c.forVar(&v, &i) && c.value(&list) && c.ws() && c.Exp("}}") && c.stmts(&stmt) {
+	if c.Match("for") && c.forVar(&v, &i) && c.value(&list) && c.closeTag() && c.stmts(&stmt) {
 		*out = For{Var: v, Idx: i, List: list, Stmt: stmt}
 		return true
 	}
@@ -175,7 +183,7 @@ func (c *Compiler) forIdx(v *nom.Token) bool {
 func (c *Compiler) ifStmt(out *AST) bool {
 	var cond AST
 	var stmt []AST
-	if c.Match("if") && c.value(&cond) && c.ws() && c.Exp("}}") && c.stmts(&stmt) {
+	if c.Match("if") && c.value(&cond) && c.closeTag() && c.stmts(&stmt) {
 		var Then, Elze []AST
 		Then = stmt
 		for i, s := range stmt {
@@ -198,7 +206,7 @@ func (c *Compiler) value(out *AST) bool {
 
 func (c *Compiler) jsonValue(out *AST) bool {
 	// Temporary naive implementation.
-	if m := c.Mark(); c.Find("}}") {
+	if m := c.Mark(); c.naiveTag("{", "}") || c.naiveTag("[", "]") {
 		var obj any
 		if err := json.Unmarshal([]byte(c.Token(m).Text), &obj); err != nil {
 			return c.Expected(err.Error())
@@ -207,6 +215,23 @@ func (c *Compiler) jsonValue(out *AST) bool {
 		return true
 	}
 	return false
+}
+
+func (p *Compiler) naiveTag(open, close string) bool {
+	c := 1
+	if p.Match(open) {
+		for p.More() && c != 0 {
+			switch {
+			case p.Match(open):
+				c++
+			case p.Match(close):
+				c--
+			default:
+				p.Next()
+			}
+		}
+	}
+	return c == 0
 }
 
 func (c *Compiler) ws() bool {

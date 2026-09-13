@@ -3,6 +3,7 @@ package ten
 import (
 	"bytes"
 	"cmp"
+	"strings"
 	"testing"
 )
 
@@ -118,6 +119,16 @@ func TestExecute(t *testing.T) {
 		{
 			give: `{{ "a\nb" }} {{ "\"a\nb\"" }}`,
 			then: "a\nb \"a\nb\"",
+		},
+		{
+			give: strings.Join([]string{
+				"{{ for a : [2, 3] -}}",
+				"    {{ for b : [4, 5] -}}",
+				`        {{ a }} {{ b }}{{ "\n" -}}`,
+				"    {{ end -}}",
+				"{{ end }}",
+			}, "\n"),
+			then: "2 4\n2 5\n3 4\n3 5\n",
 		},
 	}
 
