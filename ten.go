@@ -31,7 +31,7 @@ func (c *Compiler) Compile(out *Template) bool {
 
 func (c *Compiler) stmts(out *[]AST) bool {
 	var o AST
-	for c.stmt(&o) {
+	for c.More() && c.stmt(&o) {
 		if _, ok := o.(End); ok {
 			break
 		}
@@ -45,7 +45,7 @@ func (c *Compiler) stmt(out *AST) bool {
 }
 
 func (c *Compiler) text(out *AST) bool {
-	if m := c.Mark(); c.Find("{{") {
+	if m := c.Mark(); c.Find("{{") || !c.More() {
 		*out = Text{Value: c.Token(m)}
 		return true
 	}

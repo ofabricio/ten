@@ -235,6 +235,10 @@ func TestExecute(t *testing.T) {
 			give: `{{ a = { "b": 1 } }}{{ 1 + a.b > 1 }}{{ 1 + a.b }}`,
 			then: "true2",
 		},
+		{
+			give: "a",
+			then: "a",
+		},
 	}
 
 	for _, tc := range tt {
