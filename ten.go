@@ -99,64 +99,6 @@ func (c *Compiler) assignment(out *AST) bool {
 	return false
 }
 
-func (c *Compiler) literal(out *AST) bool {
-	var v nom.Token
-	if c.MatchOut(nom.DIGITS, &v) {
-		*out = Value{v.Text}
-		return true
-	}
-	if c.MatchOut(nom.STRING, &v) {
-		str, _ := strconv.Unquote(v.Text)
-		*out = Value{str}
-		return true
-	}
-	return false
-}
-
-func (c *Compiler) variable(out *AST) bool {
-
-	idxOrVar := func(v nom.Token) AST {
-		if i := 0; c.idx(&i) {
-			return Index{v, i}
-		}
-		return Variable{v}
-	}
-
-	var p []AST
-	var v nom.Token
-
-	if c.MatchOut(".", &v) {
-		p = append(p, idxOrVar(v))
-	}
-
-	for c.Match(".") && c.ExpOut(nom.WORD, &v) {
-		p = append(p, idxOrVar(v))
-	}
-
-	if c.MatchOut(nom.WORD, &v) {
-		p = append(p, idxOrVar(v))
-		for c.Match(".") && c.ExpOut(nom.WORD, &v) {
-			p = append(p, idxOrVar(v))
-		}
-	}
-
-	if len(p) > 0 {
-		*out = Path{Path: p}
-		return true
-	}
-	return false
-}
-
-func (c *Compiler) idx(out *int) bool {
-	var i nom.Token
-	if c.Match("[") && c.ExpOut(nom.DIGITS, &i) && c.Exp("]") {
-		idx, _ := strconv.Atoi(i.Text)
-		*out = idx
-		return true
-	}
-	return false
-}
-
 func (c *Compiler) forStmt(out *AST) bool {
 	var list AST
 	var stmt []AST
@@ -244,21 +186,85 @@ func (c *Compiler) boolAnd(out *AST) bool {
 
 func (c *Compiler) boolFact(out *AST) bool {
 	c.ws()
-	return c.Match("(") && c.boolExpr(out) && c.Exp(")") || c.boolValue(out)
-}
-
-func (c *Compiler) boolValue(out *AST) bool {
-	var v nom.Token
-	if c.MatchOut("true", &v) || c.MatchOut("false", &v) {
-		*out = Value{v.Text == "true"}
-		return true
-	}
-	return c.variable(out)
+	return c.Match("(") && c.boolExpr(out) && c.Exp(")") || c.bool(out) || c.variable(out)
 }
 
 func (c *Compiler) value(out *AST) bool {
 	c.ws()
-	return c.literal(out) || c.expr(out) || c.jsonValue(out)
+	return c.number(out) || c.str(out) || c.jsonValue(out) || c.expr(out)
+}
+
+func (c *Compiler) variable(out *AST) bool {
+
+	idxOrVar := func(v nom.Token) AST {
+		if i := 0; c.idx(&i) {
+			return Index{v, i}
+		}
+		return Variable{v}
+	}
+
+	var p []AST
+	var v nom.Token
+
+	if c.MatchOut(".", &v) {
+		p = append(p, idxOrVar(v))
+	}
+
+	for c.Match(".") && c.ExpOut(nom.WORD, &v) {
+		p = append(p, idxOrVar(v))
+	}
+
+	if c.MatchOut(nom.WORD, &v) {
+		p = append(p, idxOrVar(v))
+		for c.Match(".") && c.ExpOut(nom.WORD, &v) {
+			p = append(p, idxOrVar(v))
+		}
+	}
+
+	if len(p) > 0 {
+		*out = Path{Path: p}
+		return true
+	}
+	return false
+}
+
+func (c *Compiler) idx(out *int) bool {
+	var i nom.Token
+	if c.Match("[") && c.ExpOut(nom.DIGITS, &i) && c.Exp("]") {
+		idx, _ := strconv.Atoi(i.Text)
+		*out = idx
+		return true
+	}
+	return false
+}
+
+func (c *Compiler) bool(out *AST) bool {
+	var v nom.Token
+	if c.MatchOut("true", &v) || c.MatchOut("false", &v) {
+		*out = Literal[bool]{Token: v, Value: v.Text == "true"}
+		return true
+	}
+	return false
+}
+
+func (c *Compiler) number(out *AST) bool {
+	var v nom.Token
+	if c.MatchOut(nom.DIGITS, &v) {
+		i, _ := strconv.ParseInt(v.Text, 10, 64)
+		*out = Literal[int64]{Token: v, Value: i}
+		return true
+	}
+	return false
+}
+
+func (c *Compiler) str(out *AST) bool {
+	var v nom.Token
+	if c.MatchOut(nom.STRING, &v) {
+		str, _ := strconv.Unquote(v.Text)
+		*out = Literal[string]{Token: v, Value: str}
+		return true
+	}
+	return false
 }
 
 func (c *Compiler) jsonValue(out *AST) bool {
@@ -268,7 +274,7 @@ func (c *Compiler) jsonValue(out *AST) bool {
 		if err := json.Unmarshal([]byte(c.Token(m).Text), &obj); err != nil {
 			return c.Expected(err.Error())
 		}
-		*out = Value{obj}
+		*out = Literal[any]{Token: c.Token(m), Value: obj}
 		return true
 	}
 	return false
@@ -358,10 +364,6 @@ type Index struct {
 	Idx int
 }
 
-type Value struct {
-	Value any
-}
-
 type Text struct {
 	Value nom.Token
 }
@@ -390,13 +392,25 @@ type BoolExpr struct {
 	R AST
 }
 
+type MathExpr struct {
+	V string
+	L AST
+	R AST
+}
+
+type Literal[T any] struct {
+	Token nom.Token
+	Value T
+}
+
 func (b *BoolExpr) Evaluate(vars map[string]any) bool {
+
 	test := func(n AST) bool {
 		switch v := n.(type) {
 		case bool:
 			return v
-		case Value:
-			return v.Value.(bool)
+		case Literal[bool]:
+			return v.Value
 		case Path:
 			return v.Resolve(vars).(bool)
 		case BoolExpr:
@@ -434,7 +448,7 @@ func (t *Template) execute(n AST, w io.Writer) {
 		switch n := n.List.(type) {
 		case Path:
 			arr = n.Resolve(t.Variables).([]any)
-		case Value:
+		case Literal[any]:
 			arr = n.Value.([]any)
 		}
 		for i, item := range arr {
@@ -448,38 +462,47 @@ func (t *Template) execute(n AST, w io.Writer) {
 			t.Variables["."] = ctx
 		}
 	case If:
+		var ok bool
 		switch cond := n.Cond.(type) {
-		case bool:
-			stmts := n.Else
-			if cond {
-				stmts = n.Then
-			}
-			for _, stmt := range stmts {
-				t.execute(stmt, w)
-			}
 		case BoolExpr:
-			n.Cond = cond.Evaluate(t.Variables)
-			t.execute(n, w)
+			ok = cond.Evaluate(t.Variables)
 		case Path:
-			n.Cond = cond.Resolve(t.Variables)
-			t.execute(n, w)
-		case Value:
-			n.Cond = cond.Value
-			t.execute(n, w)
+			if v, k := cond.Resolve(t.Variables).(bool); k {
+				ok = v
+			}
+		case Literal[bool]:
+			ok = cond.Value
+		}
+		stmts := n.Else
+		if ok {
+			stmts = n.Then
+		}
+		for _, stmt := range stmts {
+			t.execute(stmt, w)
 		}
 	case Path:
 		t.execute(n.Resolve(t.Variables), w)
 	case Assignment:
 		switch rhs := n.RHS.(type) {
-		case Value:
+		case Literal[string]:
+			t.Variables[n.LHS.Name.Text] = rhs.Value
+		case Literal[int64]:
+			t.Variables[n.LHS.Name.Text] = rhs.Value
+		case Literal[any]:
 			t.Variables[n.LHS.Name.Text] = rhs.Value
 		case Path:
 			t.Variables[n.LHS.Name.Text] = rhs.Resolve(t.Variables)
 		}
 	case BoolExpr:
 		t.execute(n.Evaluate(t.Variables), w)
-	case Value:
+	case Literal[bool]:
+		fmt.Fprint(w, n.Token.Text)
+	case Literal[string]:
 		fmt.Fprint(w, n.Value)
+	case Literal[int64]:
+		fmt.Fprint(w, n.Token.Text)
+	case Literal[any]:
+		fmt.Fprint(w, n.Token.Text)
 	case Text:
 		fmt.Fprint(w, n.Value.Text)
 	default:

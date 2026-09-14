@@ -15,6 +15,26 @@ func TestExecute(t *testing.T) {
 		then string
 	}{
 		{
+			give: `{{ 123 }}`,
+			then: `123`,
+		},
+		{
+			give: `{{ true }}{{ false }}`,
+			then: `truefalse`,
+		},
+		{
+			give: `{{ "abc\nd" }}`,
+			then: "abc\nd",
+		},
+		{
+			give: `{{ {} }}`,
+			then: `{}`,
+		},
+		{
+			give: `{{ [1, 2] }}`,
+			then: `[1, 2]`,
+		},
+		{
 			give: `{{ . }}`,
 			then: `<nil>`,
 		},
@@ -139,10 +159,6 @@ func TestExecute(t *testing.T) {
 			desc: "Test array index access in a for",
 			give: `{{ for v : [ ["A", "B"], [1, 2] ]}}(V:{{ v[0] }} D:{{ v[1] }}){{ end }}`,
 			then: "(V:A D:B)(V:1 D:2)",
-		},
-		{
-			give: `{{ "a\nb" }} {{ "\"a\nb\"" }}`,
-			then: "a\nb \"a\nb\"",
 		},
 		{
 			give: strings.Join([]string{
