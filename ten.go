@@ -156,6 +156,10 @@ func (c *Compiler) boolCmpExpr(out *AST) bool {
 			*out = BoolExpr{o.Text, l, r}
 			return true
 		}
+		if (c.MatchOut(">=", &o) || c.MatchOut("<=", &o) || c.MatchOut(">", &o) || c.MatchOut("<", &o)) && c.boolCmpExpr(&r) {
+			*out = BoolExpr{o.Text, l, r}
+			return true
+		}
 		*out = l
 		return true
 	}
@@ -289,8 +293,8 @@ func (c *Compiler) bool(out *AST) bool {
 func (c *Compiler) number(out *AST) bool {
 	var v nom.Token
 	if c.MatchOut(nom.DIGITS, &v) {
-		i, _ := strconv.ParseInt(v.Text, 10, 64)
-		*out = Literal[int64]{Token: v, Value: i}
+		f, _ := strconv.ParseFloat(v.Text, 64)
+		*out = Literal[float64]{Token: v, Value: f}
 		return true
 	}
 	return false
@@ -436,25 +440,12 @@ type MathExpr struct {
 	R AST
 }
 
-func (b *MathExpr) Evaluate(vars map[string]any) int64 {
-	test := func(n AST) int64 {
-		switch v := n.(type) {
-		case int64:
-			return v
-		case Literal[int64]:
-			return v.Value
-		case Path:
-			return v.Resolve(vars).(int64)
-		case MathExpr:
-			return v.Evaluate(vars)
-		}
-		return 0
-	}
+func (b *MathExpr) Evaluate(vars map[string]any) float64 {
 	switch b.V {
 	case "+":
-		return test(b.L) + test(b.R)
+		return extractFloat64(b.L, vars) + extractFloat64(b.R, vars)
 	case "*":
-		return test(b.L) * test(b.R)
+		return extractFloat64(b.L, vars) * extractFloat64(b.R, vars)
 	}
 	return 0
 }
@@ -466,31 +457,61 @@ type BoolExpr struct {
 }
 
 func (b *BoolExpr) Evaluate(vars map[string]any) bool {
-
-	test := func(n AST) bool {
-		switch v := n.(type) {
-		case bool:
-			return v
-		case Literal[bool]:
-			return v.Value
-		case Path:
-			return v.Resolve(vars).(bool)
-		case BoolExpr:
-			return v.Evaluate(vars)
-		}
-		return false
-	}
 	switch b.V {
 	case "&":
-		return test(b.L) && test(b.R)
+		return extractBool(b.L, vars) && extractBool(b.R, vars)
 	case "|":
-		return test(b.L) || test(b.R)
+		return extractBool(b.L, vars) || extractBool(b.R, vars)
 	case "==":
-		return test(b.L) == test(b.R)
+		return extractBool(b.L, vars) == extractBool(b.R, vars)
 	case "!=":
-		return test(b.L) != test(b.R)
+		return extractBool(b.L, vars) != extractBool(b.R, vars)
+	case ">=":
+		return extractFloat64(b.L, vars) >= extractFloat64(b.R, vars)
+	case ">":
+		return extractFloat64(b.L, vars) > extractFloat64(b.R, vars)
+	case "<=":
+		return extractFloat64(b.L, vars) <= extractFloat64(b.R, vars)
+	case "<":
+		return extractFloat64(b.L, vars) < extractFloat64(b.R, vars)
 	}
 	return false
+}
+
+func extractBool(n AST, vars map[string]any) bool {
+	switch v := n.(type) {
+	case MathExpr:
+		return v.Evaluate(vars) != 0
+	case BoolExpr:
+		return v.Evaluate(vars)
+	case Path:
+		return v.Resolve(vars).(bool)
+	case Literal[float64]:
+		return v.Value != 0
+	case Literal[bool]:
+		return v.Value
+	}
+	return false
+}
+
+func extractFloat64(n AST, vars map[string]any) float64 {
+	switch v := n.(type) {
+	case MathExpr:
+		return v.Evaluate(vars)
+	case BoolExpr:
+		if v.Evaluate(vars) {
+			return 1
+		}
+	case Path:
+		return v.Resolve(vars).(float64)
+	case Literal[float64]:
+		return v.Value
+	case Literal[bool]:
+		if v.Value {
+			return 1
+		}
+	}
+	return 0
 }
 
 func (t *Template) Execute(v any, w io.Writer) {
@@ -532,12 +553,12 @@ func (t *Template) execute(n AST, w io.Writer) {
 			switch v := cond.Resolve(t.Variables).(type) {
 			case bool:
 				ok = v
-			case int64:
+			case float64:
 				ok = v != 0
 			}
 		case Literal[bool]:
 			ok = cond.Value
-		case Literal[int64]:
+		case Literal[float64]:
 			ok = cond.Value != 0
 		}
 		stmts := n.Else
@@ -553,7 +574,7 @@ func (t *Template) execute(n AST, w io.Writer) {
 		switch rhs := n.RHS.(type) {
 		case Literal[string]:
 			t.Variables[n.LHS.Name.Text] = rhs.Value
-		case Literal[int64]:
+		case Literal[float64]:
 			t.Variables[n.LHS.Name.Text] = rhs.Value
 		case Literal[any]:
 			t.Variables[n.LHS.Name.Text] = rhs.Value
@@ -568,7 +589,7 @@ func (t *Template) execute(n AST, w io.Writer) {
 		fmt.Fprint(w, n.Token.Text)
 	case Literal[string]:
 		fmt.Fprint(w, n.Value)
-	case Literal[int64]:
+	case Literal[float64]:
 		fmt.Fprint(w, n.Token.Text)
 	case Literal[any]:
 		fmt.Fprint(w, n.Token.Text)
@@ -647,8 +668,8 @@ func (t *Template) print(n AST, depth int) {
 		t.print(fmt.Sprintf("Literal[bool]: %v", n.Value), depth)
 	case Literal[string]:
 		t.print(fmt.Sprintf("Literal[string]: %v", n.Value), depth)
-	case Literal[int64]:
-		t.print(fmt.Sprintf("Literal[int64]: %v", n.Value), depth)
+	case Literal[float64]:
+		t.print(fmt.Sprintf("Literal[float64]: %v", n.Value), depth)
 	case Literal[any]:
 		t.print(fmt.Sprintf("Literal[any]: %v", n.Value), depth)
 	case Text:

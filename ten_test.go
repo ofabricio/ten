@@ -207,6 +207,34 @@ func TestExecute(t *testing.T) {
 			give: "{{ 3 != 3 }}",
 			then: "false",
 		},
+		{
+			give: "{{ 1 > false }}",
+			then: "true",
+		},
+		{
+			give: "{{ 1 > true }}",
+			then: "false",
+		},
+		{
+			give: "{{ 1 == true }}",
+			then: "true",
+		},
+		{
+			give: "{{ 1 + 0 == true & true }}",
+			then: "true",
+		},
+		{
+			give: "{{ 1 + 0 != true & true }}",
+			then: "false",
+		},
+		{
+			give: "{{ 1 + 1 > true & true }}",
+			then: "true",
+		},
+		{
+			give: `{{ a = { "b": 1 } }}{{ 1 + a.b > 1 }}{{ 1 + a.b }}`,
+			then: "true2",
+		},
 	}
 
 	for _, tc := range tt {
