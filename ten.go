@@ -555,6 +555,8 @@ func (t *Template) execute(n AST, w io.Writer) {
 				ok = v
 			case float64:
 				ok = v != 0
+			case string:
+				ok = len(v) > 0
 			}
 		case Literal[bool]:
 			ok = cond.Value

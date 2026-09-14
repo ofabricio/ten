@@ -239,6 +239,14 @@ func TestExecute(t *testing.T) {
 			give: "a",
 			then: "a",
 		},
+		{
+			give: `{{ a = "Hi" }}{{ if a }}yes{{ end }}`,
+			then: "yes",
+		},
+		{
+			give: `{{ a = "" }}{{ if a }}yes{{ else }}no{{ end }}`,
+			then: "no",
+		},
 	}
 
 	for _, tc := range tt {
