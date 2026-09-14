@@ -119,6 +119,22 @@ func TestExecute(t *testing.T) {
 			then: "yes",
 		},
 		{
+			give: "{{ if 1 }}yes{{ else }}no{{ end }}",
+			then: "yes",
+		},
+		{
+			give: "{{ if 0 }}yes{{ else }}no{{ end }}",
+			then: "no",
+		},
+		{
+			give: "{{ a = 1 }}{{ if a }}yes{{ else }}no{{ end }}",
+			then: "yes",
+		},
+		{
+			give: "{{ a = 0 }}{{ if a }}yes{{ else }}no{{ end }}",
+			then: "no",
+		},
+		{
 			give: "{{ if false }}yes{{ end }}",
 			then: "",
 		},

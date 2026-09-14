@@ -186,7 +186,7 @@ func (c *Compiler) boolAnd(out *AST) bool {
 
 func (c *Compiler) boolFact(out *AST) bool {
 	c.ws()
-	return c.Match("(") && c.boolExpr(out) && c.Exp(")") || c.bool(out) || c.variable(out)
+	return c.Match("(") && c.boolExpr(out) && c.Exp(")") || c.bool(out) || c.number(out) || c.variable(out)
 }
 
 func (c *Compiler) value(out *AST) bool {
@@ -467,11 +467,16 @@ func (t *Template) execute(n AST, w io.Writer) {
 		case BoolExpr:
 			ok = cond.Evaluate(t.Variables)
 		case Path:
-			if v, k := cond.Resolve(t.Variables).(bool); k {
+			switch v := cond.Resolve(t.Variables).(type) {
+			case bool:
 				ok = v
+			case int64:
+				ok = v != 0
 			}
 		case Literal[bool]:
 			ok = cond.Value
+		case Literal[int64]:
+			ok = cond.Value != 0
 		}
 		stmts := n.Else
 		if ok {
