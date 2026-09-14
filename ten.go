@@ -6,6 +6,7 @@ import (
 	"io"
 	"reflect"
 	"strconv"
+	"strings"
 
 	"github.com/ofabricio/nom"
 )
@@ -512,5 +513,82 @@ func (t *Template) execute(n AST, w io.Writer) {
 		fmt.Fprint(w, n.Value.Text)
 	default:
 		fmt.Fprint(w, n)
+	}
+}
+
+func (t *Template) print(n AST, depth int) {
+	switch n := n.(type) {
+	case Template:
+		t.print("Template [", depth)
+		t.print(fmt.Sprintf("Variables: %v", t.Variables), depth+1)
+		for _, stmt := range n.Statements {
+			t.print(stmt, depth+1)
+		}
+		t.print("]", depth)
+	case For:
+		t.print("For [", depth)
+		t.print(fmt.Sprintf("Var: '%s'", n.Var.Text), depth+1)
+		t.print(fmt.Sprintf("Idx: '%s'", n.Idx.Text), depth+1)
+		t.print("List [", depth)
+		t.print(n.List, depth+1)
+		t.print("]", depth)
+		t.print("Body [", depth)
+		for _, stmt := range n.Stmt {
+			t.print(stmt, depth+1)
+		}
+		t.print("]", depth)
+	case If:
+		t.print("If [", depth)
+		t.print(n.Cond, depth+1)
+		t.print("]", depth)
+		t.print("Then [", depth)
+		for _, stmt := range n.Then {
+			t.print(stmt, depth+1)
+		}
+		t.print("]", depth)
+		t.print("Else [", depth)
+		for _, stmt := range n.Else {
+			t.print(stmt, depth+1)
+		}
+		t.print("]", depth)
+	case Assignment:
+		t.print("Assignment [", depth)
+		t.print("LHS [", depth+1)
+		t.print(n.LHS, depth+2)
+		t.print("]", depth+1)
+		t.print("RHS [", depth+1)
+		t.print(n.RHS, depth+2)
+		t.print("]", depth+1)
+		t.print("]", depth)
+	case BoolExpr:
+		t.print("BoolExpr [", depth)
+		t.print(fmt.Sprintf("Value: %v", n.V), depth+1)
+		t.print("Left [", depth+1)
+		t.print(n.L, depth+2)
+		t.print("]", depth+1)
+		t.print("Right [", depth+1)
+		t.print(n.R, depth+2)
+		t.print("]", depth+1)
+		t.print("]", depth)
+	case Literal[bool]:
+		t.print(fmt.Sprintf("Literal[bool]: %v", n.Value), depth)
+	case Literal[string]:
+		t.print(fmt.Sprintf("Literal[string]: %v", n.Value), depth)
+	case Literal[int64]:
+		t.print(fmt.Sprintf("Literal[int64]: %v", n.Value), depth)
+	case Literal[any]:
+		t.print(fmt.Sprintf("Literal[any]: %v", n.Value), depth)
+	case Text:
+		t.print(fmt.Sprintf("Text: %v", n.Value.Text), depth)
+	case Variable:
+		t.print(fmt.Sprintf("Variable: %s", n.Name.Text), depth)
+	case Path:
+		t.print("Path [", depth)
+		for _, stmt := range n.Path {
+			t.print(stmt, depth+1)
+		}
+		t.print("]", depth)
+	default:
+		fmt.Printf("%s%v\n", strings.Repeat("    ", depth), n)
 	}
 }
