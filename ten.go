@@ -104,7 +104,7 @@ func (c *Compiler) forStmt(out *AST) bool {
 	var list AST
 	var stmt []AST
 	var v, i nom.Token
-	if c.Match("for") && c.forVar(&v, &i) && c.value(&list) && c.closeTag() && c.stmts(&stmt) {
+	if c.Match("for") && c.forVar(&v, &i) && c.forList(&list) && c.closeTag() && c.stmts(&stmt) {
 		*out = For{Var: v, Idx: i, List: list, Stmt: stmt}
 		return true
 	}
@@ -117,6 +117,11 @@ func (c *Compiler) forVar(v, i *nom.Token) bool {
 
 func (c *Compiler) forIdx(v *nom.Token) bool {
 	return c.ws() && c.Match(",") && c.ws() && c.MatchOut(nom.WORD, v) || true
+}
+
+func (c *Compiler) forList(out *AST) bool {
+	c.ws()
+	return c.jsonValue(out) || c.variable(out)
 }
 
 func (c *Compiler) ifStmt(out *AST) bool {
@@ -187,12 +192,45 @@ func (c *Compiler) boolAnd(out *AST) bool {
 
 func (c *Compiler) boolFact(out *AST) bool {
 	c.ws()
-	return c.Match("(") && c.boolExpr(out) && c.Exp(")") || c.bool(out) || c.number(out) || c.variable(out)
+	return c.Match("(") && c.boolExpr(out) && c.Exp(")") || c.bool(out) || c.mathExpr(out)
+}
+
+func (c *Compiler) mathExpr(out *AST) bool {
+	var l, r AST
+	if c.mathTerm(&l) {
+		c.ws()
+		if c.Match("+") && c.mathExpr(&r) {
+			*out = MathExpr{"+", l, r}
+			return true
+		}
+		*out = l
+		return true
+	}
+	return false
+}
+
+func (c *Compiler) mathTerm(out *AST) bool {
+	var l, r AST
+	if c.mathFact(&l) {
+		c.ws()
+		if c.Match("*") && c.mathTerm(&r) {
+			*out = MathExpr{"*", l, r}
+			return true
+		}
+		*out = l
+		return true
+	}
+	return false
+}
+
+func (c *Compiler) mathFact(out *AST) bool {
+	c.ws()
+	return c.Match("(") && c.mathExpr(out) && c.Exp(")") || c.number(out) || c.variable(out)
 }
 
 func (c *Compiler) value(out *AST) bool {
 	c.ws()
-	return c.number(out) || c.str(out) || c.jsonValue(out) || c.expr(out)
+	return c.str(out) || c.jsonValue(out) || c.expr(out)
 }
 
 func (c *Compiler) variable(out *AST) bool {
@@ -387,10 +425,9 @@ type If struct {
 	Else []AST
 }
 
-type BoolExpr struct {
-	V string
-	L AST
-	R AST
+type Literal[T any] struct {
+	Token nom.Token
+	Value T
 }
 
 type MathExpr struct {
@@ -399,9 +436,33 @@ type MathExpr struct {
 	R AST
 }
 
-type Literal[T any] struct {
-	Token nom.Token
-	Value T
+func (b *MathExpr) Evaluate(vars map[string]any) int64 {
+	test := func(n AST) int64 {
+		switch v := n.(type) {
+		case int64:
+			return v
+		case Literal[int64]:
+			return v.Value
+		case Path:
+			return v.Resolve(vars).(int64)
+		case MathExpr:
+			return v.Evaluate(vars)
+		}
+		return 0
+	}
+	switch b.V {
+	case "+":
+		return test(b.L) + test(b.R)
+	case "*":
+		return test(b.L) * test(b.R)
+	}
+	return 0
+}
+
+type BoolExpr struct {
+	V string
+	L AST
+	R AST
 }
 
 func (b *BoolExpr) Evaluate(vars map[string]any) bool {
@@ -501,6 +562,8 @@ func (t *Template) execute(n AST, w io.Writer) {
 		}
 	case BoolExpr:
 		t.execute(n.Evaluate(t.Variables), w)
+	case MathExpr:
+		t.execute(n.Evaluate(t.Variables), w)
 	case Literal[bool]:
 		fmt.Fprint(w, n.Token.Text)
 	case Literal[string]:
@@ -562,6 +625,16 @@ func (t *Template) print(n AST, depth int) {
 		t.print("]", depth)
 	case BoolExpr:
 		t.print("BoolExpr [", depth)
+		t.print(fmt.Sprintf("Value: %v", n.V), depth+1)
+		t.print("Left [", depth+1)
+		t.print(n.L, depth+2)
+		t.print("]", depth+1)
+		t.print("Right [", depth+1)
+		t.print(n.R, depth+2)
+		t.print("]", depth+1)
+		t.print("]", depth)
+	case MathExpr:
+		t.print("MathExpr [", depth)
 		t.print(fmt.Sprintf("Value: %v", n.V), depth+1)
 		t.print("Left [", depth+1)
 		t.print(n.L, depth+2)

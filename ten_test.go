@@ -177,6 +177,7 @@ func TestExecute(t *testing.T) {
 			then: "(V:A D:B)(V:1 D:2)",
 		},
 		{
+			desc: "Test trim space with -",
 			give: strings.Join([]string{
 				"{{ for a : [2, 3] -}}",
 				"    {{ for b : [4, 5] -}}",
@@ -185,6 +186,26 @@ func TestExecute(t *testing.T) {
 				"{{ end }}",
 			}, "\n"),
 			then: "2 4\n2 5\n3 4\n3 5\n",
+		},
+		{
+			give: "{{ 1 + 2 }}",
+			then: "3",
+		},
+		{
+			give: "{{ 2 * 3 }}",
+			then: "6",
+		},
+		{
+			give: "{{ 2 * (3 + 1) }}",
+			then: "8",
+		},
+		{
+			give: "{{ 3 == 3 }}",
+			then: "true",
+		},
+		{
+			give: "{{ 3 != 3 }}",
+			then: "false",
 		},
 	}
 
