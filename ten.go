@@ -205,7 +205,7 @@ func (c *Compiler) mathExpr(out *AST) bool {
 	if c.mathTerm(&l) {
 		c.ws()
 		var o nom.Token
-		if (c.MatchOut("+", &o) || c.MatchOut("-", &o)) && c.mathExpr(&r) {
+		if c.Undo(c.Mark(), (c.MatchOut("+", &o) || c.MatchOut("-", &o)) && c.mathExpr(&r)) {
 			*out = MathExpr{o.Text, l, r}
 			return true
 		}
@@ -220,7 +220,7 @@ func (c *Compiler) mathTerm(out *AST) bool {
 	if c.mathFact(&l) {
 		c.ws()
 		var o nom.Token
-		if (c.MatchOut("*", &o) || c.MatchOut("/", &o)) && c.mathTerm(&r) {
+		if c.Undo(c.Mark(), (c.MatchOut("*", &o) || c.MatchOut("/", &o)) && c.mathTerm(&r)) {
 			*out = MathExpr{o.Text, l, r}
 			return true
 		}
@@ -478,9 +478,9 @@ func (b *BoolExpr) Evaluate(vars map[string]any) bool {
 	case "|":
 		return extractBool(b.L, vars) || extractBool(b.R, vars)
 	case "==":
-		return extractBool(b.L, vars) == extractBool(b.R, vars)
+		return extractFloat64(b.L, vars) == extractFloat64(b.R, vars)
 	case "!=":
-		return extractBool(b.L, vars) != extractBool(b.R, vars)
+		return extractFloat64(b.L, vars) != extractFloat64(b.R, vars)
 	case ">=":
 		return extractFloat64(b.L, vars) >= extractFloat64(b.R, vars)
 	case ">":
@@ -552,7 +552,7 @@ func (t *Template) execute(n AST, w io.Writer) {
 		for i, item := range arr {
 			ctx := t.Variables["."]
 			t.Variables["."] = item
-			t.Variables[n.Idx.Text] = i
+			t.Variables[n.Idx.Text] = float64(i)
 			t.Variables[n.Var.Text] = item
 			for _, stmt := range n.Stmt {
 				t.execute(stmt, w)
@@ -630,14 +630,14 @@ func (t *Template) print(n AST, depth int) {
 		t.print("For [", depth)
 		t.print(fmt.Sprintf("Var: '%s'", n.Var.Text), depth+1)
 		t.print(fmt.Sprintf("Idx: '%s'", n.Idx.Text), depth+1)
-		t.print("List [", depth)
-		t.print(n.List, depth+1)
-		t.print("]", depth)
-		t.print("Body [", depth)
+		t.print("List [", depth+1)
+		t.print(n.List, depth+2)
+		t.print("]", depth+1)
+		t.print("Body [", depth+1)
 		for _, stmt := range n.Stmt {
-			t.print(stmt, depth+1)
+			t.print(stmt, depth+2)
 		}
-		t.print("]", depth)
+		t.print("]", depth+1)
 	case If:
 		t.print("If [", depth)
 		t.print(n.Cond, depth+1)
@@ -690,7 +690,7 @@ func (t *Template) print(n AST, depth int) {
 	case Literal[any]:
 		t.print(fmt.Sprintf("Literal[any]: %v", n.Value), depth)
 	case Text:
-		t.print(fmt.Sprintf("Text: %v", n.Value.Text), depth)
+		t.print(fmt.Sprintf("Text: %q", n.Value.Text), depth)
 	case Variable:
 		t.print(fmt.Sprintf("Variable: %s", n.Name.Text), depth)
 	case Path:
