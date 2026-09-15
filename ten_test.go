@@ -200,6 +200,26 @@ func TestExecute(t *testing.T) {
 			then: "8",
 		},
 		{
+			give: "{{ 2 - 3 }}",
+			then: "-1",
+		},
+		{
+			give: "{{ 2 - -3 }}",
+			then: "5",
+		},
+		{
+			give: "{{ 2 - -(-3) }}",
+			then: "-1",
+		},
+		{
+			give: "{{ 2 * 3 }}",
+			then: "6",
+		},
+		{
+			give: "{{ 9 / 3 }}",
+			then: "3",
+		},
+		{
 			give: "{{ 3 == 3 }}",
 			then: "true",
 		},

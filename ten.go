@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"reflect"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -203,8 +204,9 @@ func (c *Compiler) mathExpr(out *AST) bool {
 	var l, r AST
 	if c.mathTerm(&l) {
 		c.ws()
-		if c.Match("+") && c.mathExpr(&r) {
-			*out = MathExpr{"+", l, r}
+		var o nom.Token
+		if (c.MatchOut("+", &o) || c.MatchOut("-", &o)) && c.mathExpr(&r) {
+			*out = MathExpr{o.Text, l, r}
 			return true
 		}
 		*out = l
@@ -217,8 +219,9 @@ func (c *Compiler) mathTerm(out *AST) bool {
 	var l, r AST
 	if c.mathFact(&l) {
 		c.ws()
-		if c.Match("*") && c.mathTerm(&r) {
-			*out = MathExpr{"*", l, r}
+		var o nom.Token
+		if (c.MatchOut("*", &o) || c.MatchOut("/", &o)) && c.mathTerm(&r) {
+			*out = MathExpr{o.Text, l, r}
 			return true
 		}
 		*out = l
@@ -229,7 +232,15 @@ func (c *Compiler) mathTerm(out *AST) bool {
 
 func (c *Compiler) mathFact(out *AST) bool {
 	c.ws()
-	return c.Match("(") && c.mathExpr(out) && c.Exp(")") || c.number(out) || c.variable(out)
+	m := c.Mark()
+	if minus := c.Match("-"); c.Match("(") && c.mathExpr(out) && c.Exp(")") {
+		if minus {
+			*out = MathExpr{"-", Literal[float64]{Value: 0}, *out}
+		}
+		return true
+	}
+	c.Back(m)
+	return c.number(out) || c.variable(out)
 }
 
 func (c *Compiler) value(out *AST) bool {
@@ -292,7 +303,7 @@ func (c *Compiler) bool(out *AST) bool {
 
 func (c *Compiler) number(out *AST) bool {
 	var v nom.Token
-	if c.MatchOut(nom.DIGITS, &v) {
+	if c.MatchOut(reFloat, &v) {
 		f, _ := strconv.ParseFloat(v.Text, 64)
 		*out = Literal[float64]{Token: v, Value: f}
 		return true
@@ -444,8 +455,12 @@ func (b *MathExpr) Evaluate(vars map[string]any) float64 {
 	switch b.V {
 	case "+":
 		return extractFloat64(b.L, vars) + extractFloat64(b.R, vars)
+	case "-":
+		return extractFloat64(b.L, vars) - extractFloat64(b.R, vars)
 	case "*":
 		return extractFloat64(b.L, vars) * extractFloat64(b.R, vars)
+	case "/":
+		return extractFloat64(b.L, vars) / extractFloat64(b.R, vars)
 	}
 	return 0
 }
@@ -688,3 +703,5 @@ func (t *Template) print(n AST, depth int) {
 		fmt.Printf("%s%v\n", strings.Repeat("    ", depth), n)
 	}
 }
+
+var reFloat = regexp.MustCompile(`^-?([0-9]+[.])?[0-9]+`)
