@@ -72,7 +72,7 @@ func (c *Compiler) closeTag() bool {
 }
 
 func (c *Compiler) tagBody(out *AST) bool {
-	return c.end(out) || c.elseStmt(out) || c.ifStmt(out) || c.forStmt(out) || c.assignment(out) || c.value(out)
+	return c.end(out) || c.elseStmt(out) || c.ifStmt(out) || c.forStmt(out) || c.assignment(out) || c.expr(out)
 }
 
 func (c *Compiler) end(out *AST) bool {
@@ -94,7 +94,7 @@ func (c *Compiler) elseStmt(out *AST) bool {
 func (c *Compiler) assignment(out *AST) bool {
 	var lhs nom.Token
 	var rhs AST
-	if c.Undo(c.Mark(), (c.MatchOut(".", &lhs) || c.MatchOut(nom.WORD, &lhs)) && c.ws() && c.Match("=") && c.value(&rhs)) {
+	if c.Undo(c.Mark(), (c.MatchOut(".", &lhs) || c.MatchOut(nom.WORD, &lhs)) && c.ws() && c.Match("=") && c.expr(&rhs)) {
 		*out = Assignment{LHS: Variable{lhs}, RHS: rhs}
 		return true
 	}
@@ -145,20 +145,19 @@ func (c *Compiler) ifStmt(out *AST) bool {
 }
 
 func (c *Compiler) expr(out *AST) bool {
-	return c.boolCmpExpr(out)
+	return c.boolExpr(out)
 }
 
-func (c *Compiler) boolCmpExpr(out *AST) bool {
+func (c *Compiler) boolExpr(out *AST) bool {
 	var l, r AST
-	if c.boolExpr(&l) {
+	if c.boolOr(&l) {
 		c.ws()
 		var o nom.Token
-		if (c.MatchOut("==", &o) || c.MatchOut("!=", &o)) && c.boolCmpExpr(&r) {
-			*out = BoolExpr{o.Text, l, r}
-			return true
-		}
-		if (c.MatchOut(">=", &o) || c.MatchOut("<=", &o) || c.MatchOut(">", &o) || c.MatchOut("<", &o)) && c.boolCmpExpr(&r) {
-			*out = BoolExpr{o.Text, l, r}
+		op := c.MatchOut("==", &o) || c.MatchOut("!=", &o) ||
+			c.MatchOut(">=", &o) || c.MatchOut("<=", &o) ||
+			c.MatchOut(">", &o) || c.MatchOut("<", &o)
+		if op && c.boolExpr(&r) {
+			*out = BoolExpr{o, l, r}
 			return true
 		}
 		*out = l
@@ -167,12 +166,13 @@ func (c *Compiler) boolCmpExpr(out *AST) bool {
 	return false
 }
 
-func (c *Compiler) boolExpr(out *AST) bool {
+func (c *Compiler) boolOr(out *AST) bool {
 	var l, r AST
 	if c.boolAnd(&l) {
 		c.ws()
-		if c.Match("|") && c.boolExpr(&r) {
-			*out = BoolExpr{"|", l, r}
+		var o nom.Token
+		if c.MatchOut("|", &o) && c.boolOr(&r) {
+			*out = BoolExpr{o, l, r}
 			return true
 		}
 		*out = l
@@ -185,8 +185,9 @@ func (c *Compiler) boolAnd(out *AST) bool {
 	var l, r AST
 	if c.boolFact(&l) {
 		c.ws()
-		if c.Match("&") && c.boolAnd(&r) {
-			*out = BoolExpr{"&", l, r}
+		var o nom.Token
+		if c.MatchOut("&", &o) && c.boolAnd(&r) {
+			*out = BoolExpr{o, l, r}
 			return true
 		}
 		*out = l
@@ -197,7 +198,7 @@ func (c *Compiler) boolAnd(out *AST) bool {
 
 func (c *Compiler) boolFact(out *AST) bool {
 	c.ws()
-	return c.Match("(") && c.boolExpr(out) && c.Exp(")") || c.bool(out) || c.mathExpr(out)
+	return c.Match("(") && c.boolOr(out) && c.Exp(")") || c.bool(out) || c.mathExpr(out)
 }
 
 func (c *Compiler) mathExpr(out *AST) bool {
@@ -206,7 +207,7 @@ func (c *Compiler) mathExpr(out *AST) bool {
 		c.ws()
 		var o nom.Token
 		if c.Undo(c.Mark(), (c.MatchOut("+", &o) || c.MatchOut("-", &o)) && c.mathExpr(&r)) {
-			*out = MathExpr{o.Text, l, r}
+			*out = Expr{o, l, r}
 			return true
 		}
 		*out = l
@@ -220,8 +221,8 @@ func (c *Compiler) mathTerm(out *AST) bool {
 	if c.mathFact(&l) {
 		c.ws()
 		var o nom.Token
-		if c.Undo(c.Mark(), (c.MatchOut("*", &o) || c.MatchOut("/", &o)) && c.mathTerm(&r)) {
-			*out = MathExpr{o.Text, l, r}
+		if (c.MatchOut("*", &o) || c.MatchOut("/", &o)) && c.mathTerm(&r) {
+			*out = Expr{o, l, r}
 			return true
 		}
 		*out = l
@@ -233,19 +234,15 @@ func (c *Compiler) mathTerm(out *AST) bool {
 func (c *Compiler) mathFact(out *AST) bool {
 	c.ws()
 	m := c.Mark()
-	if minus := c.Match("-"); c.Match("(") && c.mathExpr(out) && c.Exp(")") {
+	var o nom.Token
+	if minus := c.MatchOut("-", &o); c.Match("(") && c.mathExpr(out) && c.Exp(")") {
 		if minus {
-			*out = MathExpr{"-", Literal[float64]{Value: 0}, *out}
+			*out = Expr{o, Literal{Value: float64(0)}, *out}
 		}
 		return true
 	}
 	c.Back(m)
-	return c.number(out) || c.variable(out)
-}
-
-func (c *Compiler) value(out *AST) bool {
-	c.ws()
-	return c.str(out) || c.jsonValue(out) || c.expr(out)
+	return c.str(out) || c.number(out) || c.variable(out) || c.jsonValue(out)
 }
 
 func (c *Compiler) variable(out *AST) bool {
@@ -295,7 +292,7 @@ func (c *Compiler) idx(out *int) bool {
 func (c *Compiler) bool(out *AST) bool {
 	var v nom.Token
 	if c.MatchOut("true", &v) || c.MatchOut("false", &v) {
-		*out = Literal[bool]{Token: v, Value: v.Text == "true"}
+		*out = Literal{Token: v, Value: v.Text == "true"}
 		return true
 	}
 	return false
@@ -305,7 +302,7 @@ func (c *Compiler) number(out *AST) bool {
 	var v nom.Token
 	if c.MatchOut(reFloat, &v) {
 		f, _ := strconv.ParseFloat(v.Text, 64)
-		*out = Literal[float64]{Token: v, Value: f}
+		*out = Literal{Token: v, Value: f}
 		return true
 	}
 	return false
@@ -315,7 +312,7 @@ func (c *Compiler) str(out *AST) bool {
 	var v nom.Token
 	if c.MatchOut(nom.STRING, &v) {
 		str, _ := strconv.Unquote(v.Text)
-		*out = Literal[string]{Token: v, Value: str}
+		*out = Literal{Token: v, Value: str}
 		return true
 	}
 	return false
@@ -328,7 +325,7 @@ func (c *Compiler) jsonValue(out *AST) bool {
 		if err := json.Unmarshal([]byte(c.Token(m).Text), &obj); err != nil {
 			return c.Expected(err.Error())
 		}
-		*out = Literal[any]{Token: c.Token(m), Value: obj}
+		*out = Literal{Token: c.Token(m), Value: obj}
 		return true
 	}
 	return false
@@ -368,7 +365,7 @@ type Path struct {
 	Path []AST
 }
 
-func (p *Path) Resolve(vars map[string]any) any {
+func (p *Path) Evaluate(vars map[string]any) any {
 	var v reflect.Value
 	for i, p := range p.Path {
 		if i == 0 {
@@ -440,93 +437,152 @@ type If struct {
 	Else []AST
 }
 
-type Literal[T any] struct {
+type Literal struct {
 	Token nom.Token
-	Value T
-}
-
-type MathExpr struct {
-	V string
-	L AST
-	R AST
-}
-
-func (b *MathExpr) Evaluate(vars map[string]any) float64 {
-	switch b.V {
-	case "+":
-		return extractFloat64(b.L, vars) + extractFloat64(b.R, vars)
-	case "-":
-		return extractFloat64(b.L, vars) - extractFloat64(b.R, vars)
-	case "*":
-		return extractFloat64(b.L, vars) * extractFloat64(b.R, vars)
-	case "/":
-		return extractFloat64(b.L, vars) / extractFloat64(b.R, vars)
-	}
-	return 0
+	Value any
 }
 
 type BoolExpr struct {
-	V string
+	V nom.Token
 	L AST
 	R AST
 }
 
-func (b *BoolExpr) Evaluate(vars map[string]any) bool {
-	switch b.V {
+func (x *BoolExpr) Evaluate(vars map[string]any) bool {
+	l := evaluate(x.L, vars)
+	r := evaluate(x.R, vars)
+	switch x.V.Text {
 	case "&":
-		return extractBool(b.L, vars) && extractBool(b.R, vars)
+		switch l := l.(type) {
+		case string:
+		case bool:
+			r, ok := r.(bool)
+			return ok && l && r
+		case float64:
+			r, ok := r.(float64)
+			return ok && l != 0 && r != 0
+		}
 	case "|":
-		return extractBool(b.L, vars) || extractBool(b.R, vars)
+		switch l := l.(type) {
+		case string:
+		case bool:
+			r, ok := r.(bool)
+			return ok && l || r
+		case float64:
+			r, ok := r.(float64)
+			return ok && l != 0 || r != 0
+		}
 	case "==":
-		return extractFloat64(b.L, vars) == extractFloat64(b.R, vars)
+		switch l := l.(type) {
+		case string:
+			r, ok := r.(string)
+			return ok && l == r
+		case bool:
+			r, ok := r.(bool)
+			return ok && l == r
+		case float64:
+			r, ok := r.(float64)
+			return ok && l == r
+		}
 	case "!=":
-		return extractFloat64(b.L, vars) != extractFloat64(b.R, vars)
+		switch l := l.(type) {
+		case string:
+			r, ok := r.(string)
+			return ok && l != r
+		case bool:
+			r, ok := r.(bool)
+			return ok && l != r
+		case float64:
+			r, ok := r.(float64)
+			return ok && l != r
+		}
 	case ">=":
-		return extractFloat64(b.L, vars) >= extractFloat64(b.R, vars)
+		switch l := l.(type) {
+		case string:
+			r, ok := r.(string)
+			return ok && l >= r
+		case bool:
+		case float64:
+			r, ok := r.(float64)
+			return ok && l >= r
+		}
 	case ">":
-		return extractFloat64(b.L, vars) > extractFloat64(b.R, vars)
+		switch l := l.(type) {
+		case string:
+			r, ok := r.(string)
+			return ok && l > r
+		case bool:
+		case float64:
+			r, ok := r.(float64)
+			return ok && l > r
+		}
 	case "<=":
-		return extractFloat64(b.L, vars) <= extractFloat64(b.R, vars)
+		switch l := l.(type) {
+		case string:
+			r, ok := r.(string)
+			return ok && l <= r
+		case bool:
+		case float64:
+			r, ok := r.(float64)
+			return ok && l <= r
+		}
 	case "<":
-		return extractFloat64(b.L, vars) < extractFloat64(b.R, vars)
+		switch l := l.(type) {
+		case string:
+			r, ok := r.(string)
+			return ok && l < r
+		case bool:
+		case float64:
+			r, ok := r.(float64)
+			return ok && l < r
+		}
 	}
 	return false
 }
 
-func extractBool(n AST, vars map[string]any) bool {
-	switch v := n.(type) {
-	case MathExpr:
-		return v.Evaluate(vars) != 0
-	case BoolExpr:
-		return v.Evaluate(vars)
-	case Path:
-		return v.Resolve(vars).(bool)
-	case Literal[float64]:
-		return v.Value != 0
-	case Literal[bool]:
-		return v.Value
-	}
-	return false
+type Expr struct {
+	V nom.Token
+	L AST
+	R AST
 }
 
-func extractFloat64(n AST, vars map[string]any) float64 {
-	switch v := n.(type) {
-	case MathExpr:
-		return v.Evaluate(vars)
-	case BoolExpr:
-		if v.Evaluate(vars) {
-			return 1
-		}
-	case Path:
-		return v.Resolve(vars).(float64)
-	case Literal[float64]:
-		return v.Value
-	case Literal[bool]:
-		if v.Value {
-			return 1
-		}
+func (x *Expr) Evaluate(vars map[string]any) float64 {
+	l := evaluate(x.L, vars)
+	r := evaluate(x.R, vars)
+	switch x.V.Text {
+	case "+":
+		l, _ := l.(float64)
+		r, _ := r.(float64)
+		return l + r
+	case "-":
+		l, _ := l.(float64)
+		r, _ := r.(float64)
+		return l - r
+	case "*":
+		l, _ := l.(float64)
+		r, _ := r.(float64)
+		return l * r
+	case "/":
+		l, _ := l.(float64)
+		r, _ := r.(float64)
+		return l / r
 	}
 	return 0
+}
+
+func evaluate(a AST, vars map[string]any) any {
+	switch a := a.(type) {
+	case Expr:
+		return a.Evaluate(vars)
+	case BoolExpr:
+		return a.Evaluate(vars)
+	case Path:
+		return a.Evaluate(vars)
+	case Literal:
+		return a.Value
+	default:
+		return a
+	}
 }
 
 func (t *Template) Execute(v any, w io.Writer) {
@@ -542,13 +598,7 @@ func (t *Template) execute(n AST, w io.Writer) {
 			t.execute(stmt, w)
 		}
 	case For:
-		var arr []any
-		switch n := n.List.(type) {
-		case Path:
-			arr = n.Resolve(t.Variables).([]any)
-		case Literal[any]:
-			arr = n.Value.([]any)
-		}
+		var arr []any = evaluate(n.List, t.Variables).([]any)
 		for i, item := range arr {
 			ctx := t.Variables["."]
 			t.Variables["."] = item
@@ -561,22 +611,13 @@ func (t *Template) execute(n AST, w io.Writer) {
 		}
 	case If:
 		var ok bool
-		switch cond := n.Cond.(type) {
-		case BoolExpr:
-			ok = cond.Evaluate(t.Variables)
-		case Path:
-			switch v := cond.Resolve(t.Variables).(type) {
-			case bool:
-				ok = v
-			case float64:
-				ok = v != 0
-			case string:
-				ok = len(v) > 0
-			}
-		case Literal[bool]:
-			ok = cond.Value
-		case Literal[float64]:
-			ok = cond.Value != 0
+		switch v := evaluate(n.Cond, t.Variables).(type) {
+		case bool:
+			ok = v
+		case float64:
+			ok = v != 0
+		case string:
+			ok = len(v) > 0
 		}
 		stmts := n.Else
 		if ok {
@@ -586,30 +627,20 @@ func (t *Template) execute(n AST, w io.Writer) {
 			t.execute(stmt, w)
 		}
 	case Path:
-		t.execute(n.Resolve(t.Variables), w)
+		t.execute(n.Evaluate(t.Variables), w)
 	case Assignment:
-		switch rhs := n.RHS.(type) {
-		case Literal[string]:
-			t.Variables[n.LHS.Name.Text] = rhs.Value
-		case Literal[float64]:
-			t.Variables[n.LHS.Name.Text] = rhs.Value
-		case Literal[any]:
-			t.Variables[n.LHS.Name.Text] = rhs.Value
-		case Path:
-			t.Variables[n.LHS.Name.Text] = rhs.Resolve(t.Variables)
-		}
+		t.Variables[n.LHS.Name.Text] = evaluate(n.RHS, t.Variables)
 	case BoolExpr:
 		t.execute(n.Evaluate(t.Variables), w)
-	case MathExpr:
+	case Expr:
 		t.execute(n.Evaluate(t.Variables), w)
-	case Literal[bool]:
-		fmt.Fprint(w, n.Token.Text)
-	case Literal[string]:
-		fmt.Fprint(w, n.Value)
-	case Literal[float64]:
-		fmt.Fprint(w, n.Token.Text)
-	case Literal[any]:
-		fmt.Fprint(w, n.Token.Text)
+	case Literal:
+		switch v := n.Value.(type) {
+		case string:
+			fmt.Fprint(w, v)
+		default:
+			fmt.Fprint(w, n.Token.Text)
+		}
 	case Text:
 		fmt.Fprint(w, n.Value.Text)
 	default:
@@ -663,7 +694,7 @@ func (t *Template) print(n AST, depth int) {
 		t.print("]", depth)
 	case BoolExpr:
 		t.print("BoolExpr [", depth)
-		t.print(fmt.Sprintf("Value: %v", n.V), depth+1)
+		t.print(fmt.Sprintf("Value: %v", n.V.Text), depth+1)
 		t.print("Left [", depth+1)
 		t.print(n.L, depth+2)
 		t.print("]", depth+1)
@@ -671,9 +702,9 @@ func (t *Template) print(n AST, depth int) {
 		t.print(n.R, depth+2)
 		t.print("]", depth+1)
 		t.print("]", depth)
-	case MathExpr:
-		t.print("MathExpr [", depth)
-		t.print(fmt.Sprintf("Value: %v", n.V), depth+1)
+	case Expr:
+		t.print("Expr [", depth)
+		t.print(fmt.Sprintf("Value: %v", n.V.Text), depth+1)
 		t.print("Left [", depth+1)
 		t.print(n.L, depth+2)
 		t.print("]", depth+1)
@@ -681,14 +712,8 @@ func (t *Template) print(n AST, depth int) {
 		t.print(n.R, depth+2)
 		t.print("]", depth+1)
 		t.print("]", depth)
-	case Literal[bool]:
-		t.print(fmt.Sprintf("Literal[bool]: %v", n.Value), depth)
-	case Literal[string]:
-		t.print(fmt.Sprintf("Literal[string]: %v", n.Value), depth)
-	case Literal[float64]:
-		t.print(fmt.Sprintf("Literal[float64]: %v", n.Value), depth)
-	case Literal[any]:
-		t.print(fmt.Sprintf("Literal[any]: %v", n.Value), depth)
+	case Literal:
+		t.print(fmt.Sprintf("Literal: %v (%T)", n.Value, n.Value), depth)
 	case Text:
 		t.print(fmt.Sprintf("Text: %q", n.Value.Text), depth)
 	case Variable:

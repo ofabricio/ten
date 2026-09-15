@@ -229,7 +229,7 @@ func TestExecute(t *testing.T) {
 		},
 		{
 			give: "{{ 1 > false }}",
-			then: "true",
+			then: "false",
 		},
 		{
 			give: "{{ 1 > true }}",
@@ -237,11 +237,11 @@ func TestExecute(t *testing.T) {
 		},
 		{
 			give: "{{ 1 == true }}",
-			then: "true",
+			then: "false",
 		},
 		{
 			give: "{{ 1 + 0 == true & true }}",
-			then: "true",
+			then: "false",
 		},
 		{
 			give: "{{ 1 + 0 != true & true }}",
@@ -249,7 +249,7 @@ func TestExecute(t *testing.T) {
 		},
 		{
 			give: "{{ 1 + 1 > true & true }}",
-			then: "true",
+			then: "false",
 		},
 		{
 			give: `{{ a = { "b": 1 } }}{{ 1 + a.b > 1 }}{{ 1 + a.b }}`,
@@ -271,6 +271,18 @@ func TestExecute(t *testing.T) {
 			give: `{{ for v, i : [1, 2] }}{{ if i == 0 }}a{{i}}{{end}}{{end}}`,
 			then: `a0`,
 		},
+		{
+			give: `{{ "a" == "a" }}{{ "a" == "b" }}`,
+			then: `truefalse`,
+		},
+		{
+			give: `{{ "a" != "b" }}{{ "a" == "b" }}`,
+			then: `truefalse`,
+		},
+		{
+			give: `{{ "b" > "a" }}`,
+			then: `true`,
+		},
 	}
 
 	for _, tc := range tt {
@@ -284,6 +296,7 @@ func TestExecute(t *testing.T) {
 		p.Execute(nil, &got)
 
 		if tc.then != got.String() {
+			p.print(p, 0)
 			t.Errorf("\nMsg:\n%q\nGot:\n%q\nExp:\n%q\n", cmp.Or(tc.desc, tc.give), got.String(), tc.then)
 		}
 	}
